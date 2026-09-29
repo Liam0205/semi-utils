@@ -1,0 +1,56 @@
+name: Build macOS Release Package
+
+on:
+  workflow_dispatch:
+
+env:
+  EXIFTOOL_URL: https://github.com/leslievan/fastfiles/raw/refs/heads/main/exiftool/Image-ExifTool-13.45.tar.gz
+
+jobs:
+  build:
+    runs-on: macos-14 # Apple Silicon (arm64)
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller==6.4.0
+
+    - name: Build Executable
+      run: |
+        pyinstaller --onefile --console --name semi-utils --target-arch arm64 main.py
+        file dist/semi-utils
+
+    - name: Smoke Test
+      run: |
+        mkdir -p smoke/input smoke/output smoke/exiftool
+        cp -R config.yaml fonts logos smoke/
+        curl -sSL "$EXIFTOOL_URL" | tar -xz -C smoke/exiftool --strip-components=1
+        python -c "from PIL import Image; Image.new('RGB', (1800, 1200), (90, 120, 160)).save('smoke/input/iso.jpg')"
+        smoke/exiftool/exiftool -q -overwrite_original -Make=SONY -Model=ILCE-7SM3 -LensModel='FE 24-70mm F2.8 GM II' \
+          -FocalLength=50 -FNumber=2.8 -ExposureTime=1/60 -DateTimeOriginal='2026:01:01 20:00:00' \
+          -EXIF:ISO=65535 -SensitivityType#=2 -RecommendedExposureIndex=102400 smoke/input/iso.jpg
+        cp dist/semi-utils smoke/
+        cd smoke && printf '\nx\n' | ./semi-utils
+        test -f output/iso.jpg
+
+    - name: Upload Executable
+      uses: actions/upload-artifact@v4
+      with:
+        name: semi-utils-macos-arm64
+        path: dist/semi-utils
+
+    - name: Upload Smoke Test Output
+      uses: actions/upload-artifact@v4
+      with:
+        name: smoke-output
+        path: smoke/output
